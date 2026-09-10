@@ -1,9 +1,8 @@
 @charset "utf-8";
 
 /* ==========================================================================
-   FOUNDEVER / EverGPT - Extensiones opcionales
    Componentes que la página original no incluía, construidos con los mismos
-   tokens y proporciones. Cargar DESPUÉS de foundever-evergpt.css y solo si
+   tokens y proporciones. Cargar DESPUÉS de y solo si
    se necesitan (tablas, avisos, timeline, código, etc.).
    ========================================================================== */
 
