@@ -1,7 +1,8 @@
-/*! GRAPH-HERO v1.0 - 2025-07-14
-    Config-driven knowledge-network canvas for the Blue Graph-Hero.
-    Reads window.GRAPH_HERO_CONFIG = { labels: [...], connections: [...] }
-    Place config inline BEFORE this script. */
+/*! GRAPH-HERO v1.1 - 2025-07-14
+    Config-driven knowledge-network canvas for Blue Graph-Hero and Section Graph.
+    Reads window.GRAPH_HERO_CONFIG = { targets: [...], labels: [...], connections: [...] }
+    Place config inline BEFORE this script.
+    Supports multiple independent graph instances via the targets array. */
 
 (function () {
   "use strict";
@@ -30,52 +31,42 @@
   var MAX_VELOCITY = 0.5;
 
   // Core colors
-var INDIGO = { r: 75, g: 75, b: 249 };
-var MINT = { r: 139, g: 240, b: 187 };
-var MIDNIGHT = { r: 9, g: 9, b: 45 };
-var WHITE = { r: 255, g: 255, b: 255 };
-var STONE = { r: 243, g: 243, b: 247 };
+  var INDIGO = { r: 75, g: 75, b: 249 };
+  var MINT = { r: 139, g: 240, b: 187 };
+  var MIDNIGHT = { r: 9, g: 9, b: 45 };
+  var WHITE = { r: 255, g: 255, b: 255 };
+  var STONE = { r: 243, g: 243, b: 247 };
 
-// Supporting accent colors
-var YELLOW = { r: 246, g: 245, b: 103 };
-var SAND = { r: 212, g: 203, b: 188 };
-var PINK = { r: 255, g: 164, b: 164 };
-var GREEN = { r: 140, g: 240, b: 188 };
-var LIGHT_BLUE = { r: 159, g: 188, b: 254 };
+  // Supporting accent colors
+  var YELLOW = { r: 246, g: 245, b: 103 };
+  var SAND = { r: 212, g: 203, b: 188 };
+  var PINK = { r: 255, g: 164, b: 164 };
+  var GREEN = { r: 140, g: 240, b: 188 };
+  var LIGHT_BLUE = { r: 159, g: 188, b: 254 };
 
-// Extended Midnight colors
-var MIDNIGHT_DEEP = { r: 7, g: 7, b: 36 };
-var MIDNIGHT_1 = { r: 22, g: 18, b: 70 };
-var MIDNIGHT_2 = { r: 26, g: 23, b: 93 };
-var MIDNIGHT_3 = { r: 34, g: 33, b: 102 };
+  // Extended Midnight colors
+  var MIDNIGHT_DEEP = { r: 7, g: 7, b: 36 };
+  var MIDNIGHT_1 = { r: 22, g: 18, b: 70 };
+  var MIDNIGHT_2 = { r: 26, g: 23, b: 93 };
+  var MIDNIGHT_3 = { r: 34, g: 33, b: 102 };
 
-// Extended Indigo colors
-var INDIGO_DEEP = { r: 30, g: 30, b: 100 };
-var INDIGO_1 = { r: 44, g: 44, b: 144 };
-var INDIGO_2 = { r: 60, g: 60, b: 198 };
-var INDIGO_LIGHT = { r: 93, g: 93, b: 249 };
+  // Extended Indigo colors
+  var INDIGO_DEEP = { r: 30, g: 30, b: 100 };
+  var INDIGO_1 = { r: 44, g: 44, b: 144 };
+  var INDIGO_2 = { r: 60, g: 60, b: 198 };
+  var INDIGO_LIGHT = { r: 93, g: 93, b: 249 };
 
-// Extended Stone colors
-var STONE_DARK = { r: 219, g: 219, b: 222 };
-var STONE_MID = { r: 231, g: 231, b: 236 };
-var STONE_LIGHT = { r: 248, g: 248, b: 250 };
+  // Extended Stone colors
+  var STONE_DARK = { r: 219, g: 219, b: 222 };
+  var STONE_MID = { r: 231, g: 231, b: 236 };
+  var STONE_LIGHT = { r: 248, g: 248, b: 250 };
 
-// Status colors
-var SUCCESS = { r: 245, g: 245, b: 103 };
-var ERROR = { r: 234, g: 93, b: 90 };
+  // Status colors
+  var SUCCESS = { r: 245, g: 245, b: 103 };
+  var ERROR = { r: 234, g: 93, b: 90 };
 
-  // ── State ──────────────────────────────────────────────────────
-  var hero, wrap, canvas, ctx;
-  var nodes = [];
-  var rafId = null;
-  var canvasW = 0, canvasH = 0;
-  var dpr = 1;
-  var pointerX = -9999, pointerY = -9999;
-  var pointerActive = false;
-  var reducedMotion = false;
-  var prevWidth = 0, prevHeight = 0;
-  var resizeTimer = null;
-  var isHidden = false;
+  // ── Active instances registry ──────────────────────────────────
+  var instances = [];
 
   // ── Label management ───────────────────────────────────────────
 
@@ -112,9 +103,35 @@ var ERROR = { r: 234, g: 93, b: 90 };
     return pairs;
   }
 
+  // ── Detect dark background ─────────────────────────────────────
+
+  function isDarkContext(el) {
+    // Check if the element or ancestors suggest a dark background
+    if (!el) return false;
+    // Check for reminder class (dark section in Blue)
+    if (el.classList.contains("reminder")) return true;
+    // Check for dark hero
+    if (el.classList.contains("custom-hero-dark")) return true;
+    // Check data-theme on html
+    var html = document.documentElement;
+    if (html && html.getAttribute("data-theme") === "dark") return true;
+    // Check computed background color
+    try {
+      var bg = window.getComputedStyle(el).backgroundColor;
+      if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+        var match = bg.match(/\d+/g);
+        if (match && match.length >= 3) {
+          var luminance = (parseInt(match[0]) * 299 + parseInt(match[1]) * 587 + parseInt(match[2]) * 114) / 1000;
+          if (luminance < 128) return true;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
   // ── Node creation ──────────────────────────────────────────────
 
-  function getNodeCount() {
+  function getNodeCount(canvasW) {
     var isMobile = canvasW < MOBILE_BREAKPOINT;
     var min = isMobile ? MOBILE_COUNT_MIN : DESKTOP_COUNT_MIN;
     var max = isMobile ? MOBILE_COUNT_MAX : DESKTOP_COUNT_MAX;
@@ -160,46 +177,47 @@ var ERROR = { r: 234, g: 93, b: 90 };
     };
   }
 
-  function buildNodes() {
+  function buildNodes(inst) {
     var pool = buildLabelPool();
-    var count = getNodeCount();
-    // Do not exceed available labels (avoid meaningless duplicates)
+    var count = getNodeCount(inst.canvasW);
+    // Do not exceed available labels times 3 (avoid meaningless duplicates)
     if (count > pool.length * 3) {
       count = pool.length * 3;
     }
-    nodes = [];
+    inst.nodes = [];
     for (var i = 0; i < count; i++) {
-      nodes.push(createNode(i, count, pool, canvasW, canvasH));
+      inst.nodes.push(createNode(i, count, pool, inst.canvasW, inst.canvasH));
     }
   }
 
   // ── Canvas sizing ──────────────────────────────────────────────
 
-  function measureAndSize() {
-    if (!wrap) return false;
-    var rect = wrap.getBoundingClientRect();
+  function measureAndSize(inst) {
+    if (!inst.wrap) return false;
+    var rect = inst.wrap.getBoundingClientRect();
     var w = rect.width;
     var h = rect.height;
     if (w < 1 || h < 1) return false;
 
-    dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
-    canvasW = w;
-    canvasH = h;
+    inst.dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+    inst.canvasW = w;
+    inst.canvasH = h;
 
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    inst.canvas.width = Math.round(w * inst.dpr);
+    inst.canvas.height = Math.round(h * inst.dpr);
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    inst.ctx.setTransform(inst.dpr, 0, 0, inst.dpr, 0, 0);
 
-    prevWidth = w;
-    prevHeight = h;
+    inst.prevWidth = w;
+    inst.prevHeight = h;
     return true;
   }
 
   // ── Physics ────────────────────────────────────────────────────
 
-  function updatePhysics(time) {
+  function updatePhysics(inst, time) {
     var margin = 30;
+    var nodes = inst.nodes;
     for (var i = 0; i < nodes.length; i++) {
       var n = nodes[i];
 
@@ -216,20 +234,20 @@ var ERROR = { r: 234, g: 93, b: 90 };
 
       // Soft boundary bounce
       if (n.x < margin) { n.x = margin; n.vx = Math.abs(n.vx) * 0.8; }
-      if (n.x > canvasW - margin) { n.x = canvasW - margin; n.vx = -Math.abs(n.vx) * 0.8; }
+      if (n.x > inst.canvasW - margin) { n.x = inst.canvasW - margin; n.vx = -Math.abs(n.vx) * 0.8; }
       if (n.y < margin) { n.y = margin; n.vy = Math.abs(n.vy) * 0.8; }
-      if (n.y > canvasH - margin) { n.y = canvasH - margin; n.vy = -Math.abs(n.vy) * 0.8; }
+      if (n.y > inst.canvasH - margin) { n.y = inst.canvasH - margin; n.vy = -Math.abs(n.vy) * 0.8; }
 
       // Pulse radius
       var pulse = Math.sin(time * 0.001 + n.phase) * 0.2;
       n.radius = n.baseRadius * (1 + pulse);
 
       // Pointer proximity
-      var dx = n.x - pointerX;
-      var dy = n.y - pointerY;
+      var dx = n.x - inst.pointerX;
+      var dy = n.y - inst.pointerY;
       var dist = Math.sqrt(dx * dx + dy * dy);
       var proximity = 0;
-      if (pointerActive && dist < PROXIMITY_RANGE) {
+      if (inst.pointerActive && dist < PROXIMITY_RANGE) {
         proximity = 1 - dist / PROXIMITY_RANGE;
         proximity = proximity * proximity; // Quadratic easing
       }
@@ -249,10 +267,13 @@ var ERROR = { r: 234, g: 93, b: 90 };
 
   // ── Rendering ──────────────────────────────────────────────────
 
-  function render(time) {
-    ctx.clearRect(0, 0, canvasW, canvasH);
+  function render(inst, time) {
+    var ctx = inst.ctx;
+    var nodes = inst.nodes;
+    ctx.clearRect(0, 0, inst.canvasW, inst.canvasH);
 
     var preferredPairs = buildPreferredConnections();
+    var labelColor = inst.isDark ? WHITE : MIDNIGHT;
 
     // Connections
     for (var i = 0; i < nodes.length; i++) {
@@ -286,16 +307,16 @@ var ERROR = { r: 234, g: 93, b: 90 };
         // Brighten near pointer
         var midX = (a.x + b.x) * 0.5;
         var midY = (a.y + b.y) * 0.5;
-        var pdx = midX - pointerX;
-        var pdy = midY - pointerY;
+        var pdx = midX - inst.pointerX;
+        var pdy = midY - inst.pointerY;
         var pDist = Math.sqrt(pdx * pdx + pdy * pdy);
-        if (pointerActive && pDist < PROXIMITY_RANGE) {
+        if (inst.pointerActive && pDist < PROXIMITY_RANGE) {
           var pProx = 1 - pDist / PROXIMITY_RANGE;
           alpha = Math.min(alpha + pProx * 0.2, 0.5);
         }
 
         var lineWidth = 0.7;
-        if (pointerActive && pDist < PROXIMITY_RANGE) {
+        if (inst.pointerActive && pDist < PROXIMITY_RANGE) {
           lineWidth += (1 - pDist / PROXIMITY_RANGE) * 0.8;
         }
 
@@ -337,161 +358,335 @@ var ERROR = { r: 234, g: 93, b: 90 };
       var fw = Math.round(n.currentFontWeight);
       var fs = n.fontSize;
       ctx.font = fw + " " + fs + "px 'Foundever Sans', Calibri, Arial, sans-serif";
-      ctx.fillStyle = "rgba(" + MIDNIGHT.r + "," + MIDNIGHT.g + "," + MIDNIGHT.b + "," + n.currentLabelAlpha.toFixed(3) + ")";
+      ctx.fillStyle = "rgba(" + labelColor.r + "," + labelColor.g + "," + labelColor.b + "," + n.currentLabelAlpha.toFixed(3) + ")";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillText(n.label, n.x, n.y + n.radius + 5);
     }
   }
 
-  // ── Animation loop ─────────────────────────────────────────────
+  // ── Animation loop (per instance) ─────────────────────────────
 
-  function loop(time) {
-    if (isHidden) return;
-    updatePhysics(time);
-    render(time);
-    rafId = requestAnimationFrame(loop);
-  }
-
-  function startLoop() {
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(loop);
-  }
-
-  function stopLoop() {
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
+  function createLoop(inst) {
+    function loop(time) {
+      if (inst.isHidden || inst.paused) return;
+      updatePhysics(inst, time);
+      render(inst, time);
+      inst.rafId = requestAnimationFrame(loop);
     }
+    return loop;
   }
 
-  // ── Resize handling ────────────────────────────────────────────
+  function startLoop(inst) {
+    if (inst.rafId) cancelAnimationFrame(inst.rafId);
+    inst.paused = false;
+    inst.rafId = requestAnimationFrame(inst.loop);
+  }
 
-  function handleResize() {
-    if (!wrap) return;
-    var rect = wrap.getBoundingClientRect();
+  function stopLoop(inst) {
+    if (inst.rafId) {
+      cancelAnimationFrame(inst.rafId);
+      inst.rafId = null;
+    }
+    inst.paused = true;
+  }
+
+  // ── Resize handling (per instance) ─────────────────────────────
+
+  function handleResize(inst) {
+    if (!inst.wrap) return;
+    var rect = inst.wrap.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
-    if (Math.abs(rect.width - prevWidth) < 1 && Math.abs(rect.height - prevHeight) < 1) return;
+    if (Math.abs(rect.width - inst.prevWidth) < 1 && Math.abs(rect.height - inst.prevHeight) < 1) return;
 
-    var oldW = canvasW || rect.width;
-    var oldH = canvasH || rect.height;
+    var oldW = inst.canvasW || rect.width;
+    var oldH = inst.canvasH || rect.height;
 
-    measureAndSize();
+    measureAndSize(inst);
 
     // Proportionally reposition
-    var scaleX = canvasW / oldW;
-    var scaleY = canvasH / oldH;
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].x = Math.max(30, Math.min(canvasW - 30, nodes[i].x * scaleX));
-      nodes[i].y = Math.max(30, Math.min(canvasH - 30, nodes[i].y * scaleY));
+    var scaleX = inst.canvasW / oldW;
+    var scaleY = inst.canvasH / oldH;
+    for (var i = 0; i < inst.nodes.length; i++) {
+      inst.nodes[i].x = Math.max(30, Math.min(inst.canvasW - 30, inst.nodes[i].x * scaleX));
+      inst.nodes[i].y = Math.max(30, Math.min(inst.canvasH - 30, inst.nodes[i].y * scaleY));
     }
 
     // Adjust node count for breakpoint
-    var targetCount = getNodeCount();
-    if (nodes.length > targetCount + 5) {
-      nodes.length = targetCount;
-    } else if (nodes.length < targetCount - 5) {
+    var targetCount = getNodeCount(inst.canvasW);
+    if (inst.nodes.length > targetCount + 5) {
+      inst.nodes.length = targetCount;
+    } else if (inst.nodes.length < targetCount - 5) {
       var pool = buildLabelPool();
-      while (nodes.length < targetCount) {
-        nodes.push(createNode(nodes.length, targetCount, pool, canvasW, canvasH));
+      while (inst.nodes.length < targetCount) {
+        inst.nodes.push(createNode(inst.nodes.length, targetCount, pool, inst.canvasW, inst.canvasH));
       }
     }
 
-    if (reducedMotion) {
-      render(performance.now());
+    if (inst.reducedMotion) {
+      render(inst, performance.now());
     }
   }
 
-  function debouncedResize() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(handleResize, RESIZE_DEBOUNCE);
+  function createDebouncedResize(inst) {
+    var timer = null;
+    return function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { handleResize(inst); }, RESIZE_DEBOUNCE);
+    };
   }
 
-  // ── Pointer tracking ──────────────────────────────────────────
+  // ── Pointer tracking (per instance) ────────────────────────────
 
-  function onPointerMove(e) {
-    if (!canvas) return;
-    var rect = canvas.getBoundingClientRect();
-    pointerX = e.clientX - rect.left;
-    pointerY = e.clientY - rect.top;
-    pointerActive = true;
+  function createPointerMove(inst) {
+    return function (e) {
+      if (!inst.canvas) return;
+      var rect = inst.canvas.getBoundingClientRect();
+      inst.pointerX = e.clientX - rect.left;
+      inst.pointerY = e.clientY - rect.top;
+      inst.pointerActive = true;
+    };
   }
 
-  function onPointerLeave() {
-    pointerActive = false;
+  function createPointerLeave(inst) {
+    return function () {
+      inst.pointerActive = false;
+    };
   }
 
-  // ── Visibility API ─────────────────────────────────────────────
+  // ── Resolve the graph container from a target selector ─────────
 
-  function onVisibilityChange() {
-    if (document.hidden) {
-      isHidden = true;
-      stopLoop();
+  function resolveTarget(selector) {
+    // The selector might point to:
+    // 1. An element with .custom-graph-hero (hero or section with graph)
+    // 2. A .custom-graph-wrap directly
+    var el = document.querySelector(selector);
+    if (!el) return null;
+
+    var container, wrap;
+
+    if (el.classList.contains("custom-graph-wrap")) {
+      // Selector points directly to the wrapper
+      wrap = el;
+      container = el.parentElement;
+    } else if (el.classList.contains("custom-graph-hero")) {
+      // Selector points to the parent section
+      container = el;
+      wrap = el.querySelector(".custom-graph-wrap");
     } else {
-      isHidden = false;
-      if (!reducedMotion) {
-        startLoop();
-      }
+      // Try finding .custom-graph-wrap inside the selected element
+      wrap = el.querySelector(".custom-graph-wrap");
+      container = wrap ? wrap.parentElement : null;
     }
+
+    if (!container || !wrap) return null;
+
+    return { container: container, wrap: wrap };
   }
 
-  // ── Initialization ─────────────────────────────────────────────
+  // ── Create one instance ────────────────────────────────────────
 
-  function init() {
-    hero = document.querySelector(".custom-graph-hero");
-    if (!hero) return;
+  function createInstance(selector) {
+    var resolved = resolveTarget(selector);
+    if (!resolved) {
+      console.warn("Graph-Hero: target not found for selector:", selector);
+      return null;
+    }
 
-    wrap = hero.querySelector(".custom-graph-wrap");
-    if (!wrap) return;
+    var wrap = resolved.wrap;
+    var container = resolved.container;
 
-    canvas = wrap.querySelector("canvas");
+    // Find or create canvas
+    var canvas = wrap.querySelector("canvas");
     if (!canvas) {
       canvas = document.createElement("canvas");
       canvas.setAttribute("aria-hidden", "true");
       wrap.appendChild(canvas);
     }
 
-    ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    var inst = {
+      selector: selector,
+      container: container,
+      wrap: wrap,
+      canvas: canvas,
+      ctx: ctx,
+      nodes: [],
+      rafId: null,
+      canvasW: 0,
+      canvasH: 0,
+      dpr: 1,
+      prevWidth: 0,
+      prevHeight: 0,
+      pointerX: -9999,
+      pointerY: -9999,
+      pointerActive: false,
+      reducedMotion: false,
+      isHidden: false,
+      paused: false,
+      isDark: isDarkContext(container),
+      loop: null,
+      debouncedResize: null,
+      onPointerMove: null,
+      onPointerLeave: null,
+      resizeObserver: null
+    };
+
+    // Create bound functions
+    inst.loop = createLoop(inst);
+    inst.debouncedResize = createDebouncedResize(inst);
+    inst.onPointerMove = createPointerMove(inst);
+    inst.onPointerLeave = createPointerLeave(inst);
+
+    return inst;
+  }
+
+  // ── Initialize one instance ────────────────────────────────────
+
+  function initInstance(inst) {
+    // Pointer events on the container (not the canvas, which has pointer-events: none)
+    inst.container.addEventListener("mousemove", inst.onPointerMove);
+    inst.container.addEventListener("mouseleave", inst.onPointerLeave);
+    inst.container.addEventListener("touchmove", function (e) {
+      if (e.touches.length === 1) {
+        inst.onPointerMove(e.touches[0]);
+      }
+    }, { passive: true });
+    inst.container.addEventListener("touchend", inst.onPointerLeave);
+
+    // ResizeObserver (primary)
+    if (typeof ResizeObserver !== "undefined") {
+      inst.resizeObserver = new ResizeObserver(function () {
+        inst.debouncedResize();
+      });
+      inst.resizeObserver.observe(inst.wrap);
+    }
+
+    // Window resize (fallback)
+    window.addEventListener("resize", inst.debouncedResize);
+
+    // Attempt initial measurement and build
+    attemptBuild(inst);
+  }
+
+  function attemptBuild(inst) {
+    if (!measureAndSize(inst)) {
+      // Retry after a short delay (CSS may not be applied yet)
+      setTimeout(function () {
+        if (measureAndSize(inst)) {
+          buildAndStart(inst);
+        }
+      }, 200);
+      return;
+    }
+    buildAndStart(inst);
+  }
+
+  function buildAndStart(inst) {
+    buildNodes(inst);
+    if (inst.reducedMotion) {
+      render(inst, performance.now());
+    } else if (!inst.isHidden) {
+      startLoop(inst);
+    }
+  }
+
+  // ── Visibility API (shared) ────────────────────────────────────
+
+  function onVisibilityChange() {
+    var hidden = document.hidden;
+    for (var i = 0; i < instances.length; i++) {
+      var inst = instances[i];
+      if (hidden) {
+        inst.isHidden = true;
+        stopLoop(inst);
+      } else {
+        inst.isHidden = false;
+        if (!inst.reducedMotion) {
+          startLoop(inst);
+        }
+      }
+    }
+  }
+
+  // ── Reduced motion (shared) ────────────────────────────────────
+
+  function applyReducedMotion(reduced) {
+    for (var i = 0; i < instances.length; i++) {
+      var inst = instances[i];
+      inst.reducedMotion = reduced;
+      if (reduced) {
+        stopLoop(inst);
+        render(inst, performance.now());
+      } else if (!inst.isHidden) {
+        startLoop(inst);
+      }
+    }
+  }
+
+  // ── Resolve targets ────────────────────────────────────────────
+
+  function getTargets() {
+    if (config && config.targets && config.targets.length > 0) {
+      return config.targets;
+    }
+    // Default: look for .custom-graph-hero elements
+    var heroes = document.querySelectorAll(".custom-graph-hero");
+    var selectors = [];
+    for (var i = 0; i < heroes.length; i++) {
+      if (heroes[i].id) {
+        selectors.push("#" + heroes[i].id);
+      } else {
+        // Use the class as selector (will match the first one)
+        selectors.push(".custom-graph-hero");
+        break;
+      }
+    }
+    if (selectors.length === 0) {
+      selectors.push(".custom-graph-hero");
+    }
+    return selectors;
+  }
+
+  // ── Main initialization ────────────────────────────────────────
+
+  function init() {
+    var targets = getTargets();
+
+    for (var i = 0; i < targets.length; i++) {
+      var inst = createInstance(targets[i]);
+      if (inst) {
+        instances.push(inst);
+      }
+    }
+
+    if (instances.length === 0) return;
 
     // Check reduced motion
     var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    reducedMotion = motionQuery.matches;
+    var reduced = motionQuery.matches;
+
+    for (var j = 0; j < instances.length; j++) {
+      instances[j].reducedMotion = reduced;
+    }
+
     if (motionQuery.addEventListener) {
       motionQuery.addEventListener("change", function (e) {
-        reducedMotion = e.matches;
-        if (reducedMotion) {
-          stopLoop();
-          render(performance.now());
-        } else if (!isHidden) {
-          startLoop();
-        }
+        applyReducedMotion(e.matches);
       });
     }
 
-    // Wait for fonts, then measure
+    // Visibility
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Wait for fonts, then initialize all instances
     var afterFonts = function () {
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
-          if (!measureAndSize()) {
-            // Retry once more after a short delay
-            setTimeout(function () {
-              if (measureAndSize()) {
-                buildNodes();
-                if (reducedMotion) {
-                  render(performance.now());
-                } else {
-                  startLoop();
-                }
-              }
-            }, 200);
-            return;
-          }
-          buildNodes();
-          if (reducedMotion) {
-            render(performance.now());
-          } else {
-            startLoop();
+          for (var k = 0; k < instances.length; k++) {
+            initInstance(instances[k]);
           }
         });
       });
@@ -502,30 +697,6 @@ var ERROR = { r: 234, g: 93, b: 90 };
     } else {
       afterFonts();
     }
-
-    // Pointer events on the hero (not the canvas, which has pointer-events: none)
-    hero.addEventListener("mousemove", onPointerMove);
-    hero.addEventListener("mouseleave", onPointerLeave);
-    hero.addEventListener("touchmove", function (e) {
-      if (e.touches.length === 1) {
-        onPointerMove(e.touches[0]);
-      }
-    }, { passive: true });
-    hero.addEventListener("touchend", onPointerLeave);
-
-    // ResizeObserver (primary)
-    if (typeof ResizeObserver !== "undefined") {
-      var ro = new ResizeObserver(function () {
-        debouncedResize();
-      });
-      ro.observe(wrap);
-    }
-
-    // Window resize (fallback)
-    window.addEventListener("resize", debouncedResize);
-
-    // Visibility
-    document.addEventListener("visibilitychange", onVisibilityChange);
   }
 
   // ── Entry point ────────────────────────────────────────────────
