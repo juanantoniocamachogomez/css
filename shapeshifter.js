@@ -1,8 +1,11 @@
 /*!
- * Foundever AIDT ShapeShifter Engine v3.0 (CDN Edition)
+ * Foundever AIDT ShapeShifter Engine v3.1 (CDN Edition)
  * Faithful port of Kenneth Cachia's Shape Shifter particle physics.
  * Palette: Foundever brand tokens (Midnight, Mint, Indigo, White)
  * Year: 2026
+ *
+ * v3.1 changelog:
+ * - Fix: Dots initialize with a:0, z:0 to prevent center flash on boot
  */
 (function(){
   "use strict";
@@ -43,7 +46,6 @@
     area.h = canvas.height = window.innerHeight;
   }
 
-  /* ShapeBuilder */
   var shapeCanvas = document.createElement('canvas');
   var shapeCtx = shapeCanvas.getContext('2d');
 
@@ -93,7 +95,6 @@
     return { dots: dots, w: w + fx, h: h + fy };
   }
 
-  /* Point */
   function Point(args){
     this.x = args.x;
     this.y = args.y;
@@ -102,16 +103,16 @@
     this.h = args.h;
   }
 
-  /* Dot - faithful to Kenneth Cachia's original */
   function Dot(x, y){
     var c = COLOR_POOL[Math.floor(Math.random() * COLOR_POOL.length)];
-    this.p = new Point({x: x, y: y, z: 5, a: 1, h: 0});
+    /* v3.1 fix: born invisible (a:0, z:0) to prevent center flash */
+    this.p = new Point({x: x, y: y, z: 0, a: 0, h: 0});
     this.e = 0.07;
     this.s = true;
     this.r = c[0];
     this.g = c[1];
     this.b = c[2];
-    this.t = new Point({x: x, y: y, z: 5, a: 1, h: 0});
+    this.t = new Point({x: x, y: y, z: 0, a: 0, h: 0});
     this.q = [];
   }
 
@@ -197,7 +198,6 @@
     this._draw();
   };
 
-  /* Shape Manager - faithful to original switchShape */
   var dots = [];
   var shapeWidth = 0;
   var shapeHeight = 0;
@@ -276,7 +276,6 @@
     }
   }
 
-  /* Render Loop */
   var animId = null;
   var isVisible = true;
 
@@ -297,7 +296,6 @@
     if(animId){ cancelAnimationFrame(animId); animId = null; }
   }
 
-  /* Word Cycling */
   var cycleTimer = null;
 
   function showNextWord(){
@@ -311,7 +309,6 @@
     cycleTimer = setInterval(showNextWord, CYCLE_MS);
   }
 
-  /* Boot */
   function waitForSize(cb, attempts){
     attempts = attempts || 0;
     if(attempts > 60){ cb(); return; }
@@ -337,7 +334,6 @@
     window.addEventListener('load', boot);
   }
 
-  /* Resize */
   var resizeTimer = null;
   window.addEventListener('resize', function(){
     clearTimeout(resizeTimer);
@@ -349,7 +345,6 @@
     }, 200);
   });
 
-  /* Visibility */
   document.addEventListener('visibilitychange', function(){
     if(document.hidden){
       stopLoop();
@@ -359,7 +354,6 @@
     }
   });
 
-  /* IntersectionObserver */
   if(typeof IntersectionObserver !== 'undefined'){
     var heroEl = document.getElementById('top');
     if(heroEl){
