@@ -1,13 +1,12 @@
 /*!
- * Foundever AIDT ShapeShifter Engine v2.1 (CDN Edition)
- * Replicates 100% canonical Kenneth Cachia particle morphing physics.
+ * Foundever AIDT ShapeShifter Engine v3.0 (CDN Edition)
+ * Faithful port of Kenneth Cachia's Shape Shifter particle physics.
  * Palette: Foundever brand tokens (Midnight, Mint, Indigo, White)
  * Year: 2026
  */
 (function(){
   "use strict";
 
-  /* ── Reduced-motion bail ── */
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(reduced) return;
 
@@ -16,7 +15,6 @@
   var ctx = canvas.getContext('2d');
   if(!ctx) return;
 
-  /* ── Configuration & Parameters ── */
   var config = window.SHAPESHIFTER_CONFIG || {};
 
   var GAP = 13;
@@ -38,8 +36,6 @@
     : DEFAULT_WORDS;
 
   var wordIndex = 0;
-
-  /* ── Canvas Area Dimensions ── */
   var area = {w: 0, h: 0};
 
   function adjustCanvas(){
@@ -47,7 +43,7 @@
     area.h = canvas.height = window.innerHeight;
   }
 
-  /* ── ShapeBuilder (Off-screen canvas) ── */
+  /* ShapeBuilder */
   var shapeCanvas = document.createElement('canvas');
   var shapeCtx = shapeCanvas.getContext('2d');
 
@@ -60,187 +56,227 @@
     var sw = shapeCanvas.width;
     var sh = shapeCanvas.height;
     shapeCtx.clearRect(0, 0, sw, sh);
-    shapeCtx.fillStyle = '#000';
+    shapeCtx.fillStyle = 'red';
     shapeCtx.textBaseline = 'middle';
+    shapeCtx.textAlign = 'center';
+
     shapeCtx.font = 'bold ' + MAX_FONT + 'px Calibri, Arial, Helvetica, sans-serif';
-
     var measured = shapeCtx.measureText(word).width;
-    var s = Math.min(MAX_FONT, (sw / measured) * 0.8 * MAX_FONT, (sh / MAX_FONT) * 0.45 * MAX_FONT);
+    var s = Math.min(MAX_FONT,
+      (sw / measured) * 0.8 * MAX_FONT,
+      (sh / MAX_FONT) * 0.45 * MAX_FONT);
     shapeCtx.font = 'bold ' + Math.floor(s) + 'px Calibri, Arial, Helvetica, sans-serif';
-    measured = shapeCtx.measureText(word).width;
-    shapeCtx.fillText(word, (sw - measured) / 2, sh / 2);
 
-    var data = shapeCtx.getImageData(0, 0, sw, sh).data;
+    shapeCtx.fillText(word, sw / 2, sh / 2);
+
+    var pixels = shapeCtx.getImageData(0, 0, sw, sh).data;
     var dots = [];
-    var minX = sw, minY = sh, maxX = 0, maxY = 0;
+    var x = 0, y = 0;
+    var fx = sw, fy = sh, w = 0, h = 0;
 
-    for(var y = 0; y < sh; y += GAP){
-      for(var x = 0; x < sw; x += GAP){
-        var idx = (y * sw + x) * 4;
-        if(data[idx + 3] > 0){
-          dots.push({x: x, y: y});
-          if(x < minX) minX = x;
-          if(x > maxX) maxX = x;
-          if(y < minY) minY = y;
-          if(y > maxY) maxY = y;
-        }
+    for(var p = 0; p < pixels.length; p += (4 * GAP)){
+      if(pixels[p + 3] > 0){
+        dots.push({x: x, y: y});
+        if(x > w) w = x;
+        if(y > h) h = y;
+        if(x < fx) fx = x;
+        if(y < fy) fy = y;
+      }
+      x += GAP;
+      if(x >= sw){
+        x = 0;
+        y += GAP;
+        p += GAP * 4 * sw;
       }
     }
 
-    return {
-      dots: dots,
-      w: maxX + minX,
-      h: maxY + minY
-    };
+    return { dots: dots, w: w + fx, h: h + fy };
   }
 
-  /* ── Dot Class ── */
+  /* Point */
+  function Point(args){
+    this.x = args.x;
+    this.y = args.y;
+    this.z = args.z;
+    this.a = args.a;
+    this.h = args.h;
+  }
+
+  /* Dot - faithful to Kenneth Cachia's original */
   function Dot(x, y){
     var c = COLOR_POOL[Math.floor(Math.random() * COLOR_POOL.length)];
-    this.p = {x: x, y: y, z: 5, a: 1, h: 0};  /* position state */
-    this.t = {x: x, y: y, z: 5, a: 1};        /* target state */
-    this.q = [];                              /* trajectory queue */
+    this.p = new Point({x: x, y: y, z: 5, a: 1, h: 0});
+    this.e = 0.07;
+    this.s = true;
     this.r = c[0];
     this.g = c[1];
     this.b = c[2];
-    this.e = 0.04;                            /* easing */
-    this.s = false;                           /* static letter flag */
+    this.t = new Point({x: x, y: y, z: 5, a: 1, h: 0});
+    this.q = [];
   }
 
-  Dot.prototype.move = function(pt){
-    this.q.push({
-      x: pt.x !== undefined ? pt.x : undefined,
-      y: pt.y !== undefined ? pt.y : undefined,
-      z: pt.z !== undefined ? pt.z : undefined,
-      a: pt.a !== undefined ? pt.a : undefined,
-      h: pt.h !== undefined ? pt.h : 0
-    });
-  };
-
-  Dot.prototype._shiftQueue = function(){
-    if(this.q.length === 0) return false;
-    var next = this.q.shift();
-    if(next.x !== undefined) this.t.x = next.x;
-    if(next.y !== undefined) this.t.y = next.y;
-    if(next.z !== undefined) this.t.z = next.z;
-    if(next.a !== undefined) this.t.a = next.a;
-    this.p.h = next.h || 0;
-    return true;
-  };
-
-  Dot.prototype._moveTowards = function(tx, ty){
-    var dx = this.p.x - tx;
-    var dy = this.p.y - ty;
+  Dot.prototype.distanceTo = function(n, details){
+    var dx = this.p.x - n.x;
+    var dy = this.p.y - n.y;
     var d = Math.sqrt(dx * dx + dy * dy);
+    return details ? [dx, dy, d] : d;
+  };
+
+  Dot.prototype.move = function(p, avoidStatic){
+    if(!avoidStatic || (avoidStatic && this.distanceTo(p) > 1)){
+      this.q.push(p);
+    }
+  };
+
+  Dot.prototype._moveTowards = function(n){
+    var details = this.distanceTo(n, true);
+    var dx = details[0];
+    var dy = details[1];
+    var d = details[2];
     var e = this.e * d;
 
+    if(this.p.h === -1){
+      this.p.x = n.x;
+      this.p.y = n.y;
+      return true;
+    }
+
     if(d > 1){
-      this.p.x -= (dx / d) * e;
-      this.p.y -= (dy / d) * e;
-      return false;
+      this.p.x -= ((dx / d) * e);
+      this.p.y -= ((dy / d) * e);
     } else {
       if(this.p.h > 0){
         this.p.h--;
-        return false;
+      } else {
+        return true;
       }
-      return true;
     }
+    return false;
   };
 
-  Dot.prototype.update = function(){
-    /* Continuous alpha easing */
-    var da = this.p.a - this.t.a;
-    this.p.a = Math.max(0.1, this.p.a - da * 0.05);
+  Dot.prototype._update = function(){
+    if(this._moveTowards(this.t)){
+      var p = this.q.shift();
 
-    /* Continuous radius easing */
-    var dz = this.p.z - this.t.z;
-    this.p.z = Math.max(1, this.p.z - dz * 0.05);
-
-    /* Position progression */
-    var arrived = this._moveTowards(this.t.x, this.t.y);
-
-    if(arrived){
-      if(!this._shiftQueue()){
-        /* Queue is empty */
+      if(p){
+        this.t.x = p.x || this.p.x;
+        this.t.y = p.y || this.p.y;
+        this.t.z = p.z || this.p.z;
+        this.t.a = p.a || this.p.a;
+        this.p.h = p.h || 0;
+      } else {
         if(this.s){
-          /* Letter dot: stay perfectly still */
+          this.p.x -= Math.sin(Math.random() * 3.142);
+          this.p.y -= Math.sin(Math.random() * 3.142);
         } else {
-          /* Floater: wander randomly and shift trajectory immediately */
-          this.move({
+          this.move(new Point({
             x: this.p.x + (Math.random() * 50) - 25,
             y: this.p.y + (Math.random() * 50) - 25
-          });
-          this._shiftQueue();
+          }));
         }
       }
     }
+
+    var d = this.p.a - this.t.a;
+    this.p.a = Math.max(0.1, this.p.a - (d * 0.05));
+    d = this.p.z - this.t.z;
+    this.p.z = Math.max(1, this.p.z - (d * 0.05));
   };
 
-  Dot.prototype.render = function(c){
-    c.globalAlpha = this.p.a;
-    c.fillStyle = 'rgb(' + this.r + ',' + this.g + ',' + this.b + ')';
-    c.beginPath();
-    c.arc(this.p.x, this.p.y, this.p.z, 0, Math.PI * 2);
-    c.fill();
+  Dot.prototype._draw = function(){
+    ctx.globalAlpha = this.p.a;
+    ctx.fillStyle = 'rgba(' + this.r + ',' + this.g + ',' + this.b + ',' + this.p.a + ')';
+    ctx.beginPath();
+    ctx.arc(this.p.x, this.p.y, this.p.z, 0, 2 * Math.PI, true);
+    ctx.closePath();
+    ctx.fill();
   };
 
-  /* ── Dot Pool Management ── */
+  Dot.prototype.render = function(){
+    this._update();
+    this._draw();
+  };
+
+  /* Shape Manager - faithful to original switchShape */
   var dots = [];
+  var shapeWidth = 0;
+  var shapeHeight = 0;
 
-  function switchShape(newShape, fast){
-    var cx = (area.w / 2) - (newShape.w / 2);
-    var cy = (area.h / 2) - (newShape.h / 2);
+  function compensate(){
+    return {
+      x: area.w / 2 - shapeWidth / 2,
+      y: area.h / 2 - shapeHeight / 2
+    };
+  }
 
-    /* Grow pool if needed */
-    while(newShape.dots.length > dots.length){
-      dots.push(new Dot(area.w / 2, area.h / 2));
+  function switchShape(n, fast){
+    shapeWidth = n.w;
+    shapeHeight = n.h;
+    var offset = compensate();
+
+    if(n.dots.length > dots.length){
+      var size = n.dots.length - dots.length;
+      for(var d = 1; d <= size; d++){
+        dots.push(new Dot(area.w / 2, area.h / 2));
+      }
     }
 
-    var shapeDots = newShape.dots.slice();
     var d = 0;
+    var i = 0;
+    var shapeDots = n.dots.slice();
 
-    /* Assign letter targets */
     while(shapeDots.length > 0){
-      var i = Math.floor(Math.random() * shapeDots.length);
-      var sd = shapeDots[i];
-      var dot = dots[d];
+      i = Math.floor(Math.random() * shapeDots.length);
+      dots[d].e = fast ? 0.25 : (dots[d].s ? 0.14 : 0.11);
 
-      dot.e = fast ? 0.25 : (dot.s ? 0.14 : 0.11);
-
-      if(dot.s){
-        /* Scatter burst from previous word */
-        dot.move({z: Math.random() * 20 + 10, a: Math.random(), h: 18});
+      if(dots[d].s){
+        dots[d].move(new Point({
+          z: Math.random() * 20 + 10,
+          a: Math.random(),
+          h: 18
+        }));
       } else {
-        /* Floating dot transitioning to letter */
-        dot.move({z: Math.random() * 5 + 5, h: fast ? 18 : 30});
+        dots[d].move(new Point({
+          z: Math.random() * 5 + 5,
+          h: fast ? 18 : 30
+        }));
       }
 
-      dot.s = true;
-      dot.move({x: sd.x + cx, y: sd.y + cy, a: 1, z: 5, h: 0});
+      dots[d].s = true;
+      dots[d].move(new Point({
+        x: shapeDots[i].x + offset.x,
+        y: shapeDots[i].y + offset.y,
+        a: 1,
+        z: 5,
+        h: 0
+      }));
 
       shapeDots.splice(i, 1);
       d++;
     }
 
-    /* Excess dots become floaters */
     for(var j = d; j < dots.length; j++){
-      var fd = dots[j];
-      if(fd.s){
-        fd.move({z: Math.random() * 20 + 10, a: Math.random(), h: 20});
+      if(dots[j].s){
+        dots[j].move(new Point({
+          z: Math.random() * 20 + 10,
+          a: Math.random(),
+          h: 20
+        }));
+
+        dots[j].s = false;
+        dots[j].e = 0.04;
+        dots[j].move(new Point({
+          x: Math.random() * area.w,
+          y: Math.random() * area.h,
+          a: 0.3,
+          z: Math.random() * 4,
+          h: 0
+        }));
       }
-      fd.s = false;
-      fd.e = 0.04;
-      fd.move({
-        x: Math.random() * area.w,
-        y: Math.random() * area.h,
-        a: 0.3,
-        z: Math.random() * 4,
-        h: 0
-      });
     }
   }
 
-  /* ── Render Loop ── */
+  /* Render Loop */
   var animId = null;
   var isVisible = true;
 
@@ -248,8 +284,7 @@
     animId = requestAnimationFrame(frame);
     ctx.clearRect(0, 0, area.w, area.h);
     for(var i = 0; i < dots.length; i++){
-      dots[i].update();
-      dots[i].render(ctx);
+      dots[i].render();
     }
     ctx.globalAlpha = 1;
   }
@@ -262,12 +297,11 @@
     if(animId){ cancelAnimationFrame(animId); animId = null; }
   }
 
-  /* ── Word Cycling ── */
+  /* Word Cycling */
   var cycleTimer = null;
 
   function showNextWord(){
     var shape = buildShape(WORDS[wordIndex]);
-    /* The first word assembles rapidly (fast = true) */
     switchShape(shape, wordIndex === 0);
     wordIndex = (wordIndex + 1) % WORDS.length;
   }
@@ -277,7 +311,7 @@
     cycleTimer = setInterval(showNextWord, CYCLE_MS);
   }
 
-  /* ── Boot Sequence ── */
+  /* Boot */
   function waitForSize(cb, attempts){
     attempts = attempts || 0;
     if(attempts > 60){ cb(); return; }
@@ -303,20 +337,19 @@
     window.addEventListener('load', boot);
   }
 
-  /* ── Resize with Debounce ── */
+  /* Resize */
   var resizeTimer = null;
   window.addEventListener('resize', function(){
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function(){
       adjustCanvas();
       fitShapeCanvas();
-      /* Re-render current word to refit to new dimensions */
       var shape = buildShape(WORDS[(wordIndex - 1 + WORDS.length) % WORDS.length]);
       switchShape(shape, true);
     }, 200);
   });
 
-  /* ── Visibility API ── */
+  /* Visibility */
   document.addEventListener('visibilitychange', function(){
     if(document.hidden){
       stopLoop();
@@ -326,7 +359,7 @@
     }
   });
 
-  /* ── IntersectionObserver ── */
+  /* IntersectionObserver */
   if(typeof IntersectionObserver !== 'undefined'){
     var heroEl = document.getElementById('top');
     if(heroEl){
