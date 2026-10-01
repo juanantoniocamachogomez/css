@@ -1,22 +1,137 @@
-/*! GRAPH-HERO v1.1 - 2025-07-14
+/*! GRAPH-HERO v1.2 - 2025-07-14
     Config-driven knowledge-network canvas for Blue Graph-Hero and Section Graph.
     Reads window.GRAPH_HERO_CONFIG = { targets: [...], labels: [...], connections: [...] }
     Place config inline BEFORE this script.
-    Supports multiple independent graph instances via the targets array. */
+    Supports multiple independent graph instances via the targets array.
+
+    When GRAPH_HERO_CONFIG is missing or incomplete, the engine infers labels and
+    relationships from the page's own headings (h2/h3) and repeated strong/bold terms
+    instead of refusing to render. Inferred graphs are never presented as verified data:
+    window.FOUNDEVER_GRAPH_HERO.inferred reports whether the current graph was inferred,
+    so the surrounding markup can show the required "inferred, not verified" notice. */
 
 (function () {
   "use strict";
 
-  // ── Configuration ──────────────────────────────────────────────
-  var config = window.GRAPH_HERO_CONFIG || null;
+  // ── Configuration validation ───────────────────────────────────
+  function validateGraphConfig(cfg) {
+    return Boolean(
+      cfg &&
+      Array.isArray(cfg.targets) && cfg.targets.length > 0 &&
+      Array.isArray(cfg.labels) && cfg.labels.length > 0 &&
+      Array.isArray(cfg.connections) && cfg.connections.length > 0
+    );
+  }
 
-  var FALLBACK_LABELS = [
-    "AI", "NLP", "RAG", "deployment", "adoption", "quality",
-    "analytics", "training", "CSAT", "AHT", "compliance",
-    "knowledge", "automation", "coaching", "multilingual",
-    "sentiment", "embeddings", "grounding", "vector-search",
-    "prompt-engineering", "evaluation", "integration"
-  ];
+  // ── Inference from page content (used only when config is absent/incomplete) ──
+  function inferGraphFromDOM() {
+    var labels = [];
+    var seenLabels = {};
+
+    function addLabel(text, weight) {
+      text = (text || "").trim();
+      if (!text || text.length > 40) return null;
+      var key = text.toLowerCase();
+      if (seenLabels[key]) {
+        if (weight > seenLabels[key].weight) seenLabels[key].weight = weight;
+        return seenLabels[key];
+      }
+      var item = { text: text, weight: weight };
+      seenLabels[key] = item;
+      labels.push(item);
+      return item;
+    }
+
+    // Section headings become anchor nodes.
+    var headingEls = document.querySelectorAll("h2, h3");
+    var headingNodes = [];
+    for (var i = 0; i < headingEls.length; i++) {
+      var item = addLabel(headingEls[i].textContent, 2);
+      if (item) headingNodes.push({ el: headingEls[i], text: item.text });
+    }
+
+    // Repeated strong/bold terms become supporting nodes.
+    var scope = document.querySelector(".custom-graph-hero") || document;
+    var strongEls = scope.querySelectorAll("strong, b");
+    var counts = {};
+    var order = [];
+    for (var j = 0; j < strongEls.length; j++) {
+      var txt = (strongEls[j].textContent || "").trim();
+      if (!txt || txt.length > 40) continue;
+      var key = txt.toLowerCase();
+      if (!counts[key]) {
+        counts[key] = { text: txt, count: 0, el: strongEls[j] };
+        order.push(key);
+      }
+      counts[key].count++;
+    }
+
+    var termNodes = [];
+    for (var m = 0; m < order.length; m++) {
+      var c = counts[order[m]];
+      if (c.count >= 2) {
+        var termItem = addLabel(c.text, c.count >= 4 ? 3 : 2);
+        if (termItem) termNodes.push({ el: c.el, text: termItem.text });
+      }
+    }
+
+    if (labels.length === 0) return null;
+
+    // Connect each repeated term to the nearest preceding heading (its section).
+    function nearestHeadingBefore(el) {
+      var best = null;
+      for (var h = 0; h < headingNodes.length; h++) {
+        if (headingNodes[h].el.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+          best = headingNodes[h];
+        }
+      }
+      return best;
+    }
+
+    var connections = [];
+    for (var n = 0; n < termNodes.length; n++) {
+      var near = nearestHeadingBefore(termNodes[n].el);
+      if (near && near.text.toLowerCase() !== termNodes[n].text.toLowerCase()) {
+        connections.push([near.text, termNodes[n].text]);
+      }
+    }
+
+    // Fall back to heading-to-heading sequence so an inferred graph with only
+    // headings still shows relationships instead of isolated dots.
+    if (connections.length === 0 && headingNodes.length > 1) {
+      for (var p = 0; p < headingNodes.length - 1; p++) {
+        connections.push([headingNodes[p].text, headingNodes[p + 1].text]);
+      }
+    }
+
+    return { labels: labels, connections: connections };
+  }
+
+  // ── Configuration ──────────────────────────────────────────────
+  // Resolved inside init() (after DOMContentLoaded) so inference can read the
+  // fully-parsed page. `isInferred` and `config` are module-scoped so the rest
+  // of the engine (buildLabelPool, buildPreferredConnections, getTargets) can
+  // keep reading the single `config` closure variable unchanged.
+  var config = null;
+  var isInferred = false;
+
+  function resolveConfig() {
+    var rawConfig = window.GRAPH_HERO_CONFIG || null;
+    if (validateGraphConfig(rawConfig)) {
+      config = rawConfig;
+      isInferred = false;
+    } else {
+      var inferred = inferGraphFromDOM();
+      isInferred = true;
+      config = {
+        targets: (rawConfig && rawConfig.targets && rawConfig.targets.length > 0) ? rawConfig.targets : null,
+        labels: inferred ? inferred.labels : [],
+        connections: inferred ? inferred.connections : []
+      };
+      console.info("Graph-Hero: no verified GRAPH_HERO_CONFIG found; rendering an inferred, unverified graph from page content.");
+    }
+    window.FOUNDEVER_GRAPH_HERO = { inferred: isInferred, version: "1.2" };
+  }
 
   var DESKTOP_COUNT_MIN = 60;
   var DESKTOP_COUNT_MAX = 65;
@@ -80,11 +195,6 @@
         if (text) {
           pool.push({ text: text, weight: weight });
         }
-      }
-    }
-    if (pool.length === 0) {
-      for (var f = 0; f < FALLBACK_LABELS.length; f++) {
-        pool.push({ text: FALLBACK_LABELS[f], weight: 1 });
       }
     }
     return pool;
@@ -527,6 +637,7 @@
       isHidden: false,
       paused: false,
       isDark: isDarkContext(container),
+      inferred: isInferred,
       loop: null,
       debouncedResize: null,
       onPointerMove: null,
@@ -653,6 +764,7 @@
   // ── Main initialization ────────────────────────────────────────
 
   function init() {
+    resolveConfig();
     var targets = getTargets();
 
     for (var i = 0; i < targets.length; i++) {
